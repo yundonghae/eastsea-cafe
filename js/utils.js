@@ -137,9 +137,9 @@ function clearCart() {
   updateCartBadges();
 }
 
-/** 장바구니 총 수량 */
+/** 장바구니 총 수량 (삭제된 메뉴는 getCartDetail 이 걸러낸 count 를 재사용) */
 function getCartCount() {
-  return getCart().reduce((sum, i) => sum + i.qty, 0);
+  return getCartDetail().count;
 }
 
 /** 메뉴 정보를 조인한 상세 라인 + 합계 반환 (삭제된 메뉴는 제외) */
