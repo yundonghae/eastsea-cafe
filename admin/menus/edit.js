@@ -5,6 +5,9 @@
    ============================================ */
 
 (function () {
+  // 🔐 관리자 세션 가드 — 다른 로직보다 먼저. 통과 못 하면 렌더하지 않고 즉시 빠져나간다.
+  if (!window.CafeUtils.requireAdmin("../../index.html")) return;
+
   const { $, getParam, formatPrice, escapeHtml } = window.CafeUtils;
   const { getMenuById, getCategories, getCategoryById, updateMenu } = window.CafeData;
 
