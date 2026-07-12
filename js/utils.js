@@ -19,9 +19,6 @@ const KEYS = window.CafeData.STORAGE_KEYS;
    키 리터럴이 여기저기 흩어지지 않도록 requireAdmin() 안에서만 쓴다. */
 const ADMIN_KEY = "eastsea2026";
 
-/** 관리자 인증 여부를 담는 sessionStorage 키 (탭을 닫으면 사라진다) */
-const ADMIN_SESSION_KEY = "cafe.adminAuthed";
-
 /* ============================================
    포맷
    ============================================ */
@@ -278,33 +275,50 @@ function statusChipHtml(status) {
 }
 
 /* ============================================
-   관리자 진입 가드 (세션 단위)
+   관리자 진입 가드 (referrer 기반)
    ⚠️ 다시 강조: 진짜 인증이 아니라 실수 방지용 UX 장치다.
+   인증 상태를 어디에도 저장하지 않고, "직전 페이지가 어디였나" 로만 판단한다.
    ============================================ */
 
 /**
+ * 직전 페이지(document.referrer)가 "같은 사이트의 관리자 페이지" 였는지 판단한다.
+ * 외부 사이트 주소에 우연히 admin 이 들어 있을 수 있으므로,
+ * 경로에 "/admin/" 이 있는지와 **출처(origin)가 현재 사이트와 같은지** 를 함께 본다.
+ */
+function isFromAdminPage() {
+  const ref = document.referrer;
+  // 주소창 직접 입력 · 새 탭 · referrer 미전송 → 관리자 내부 이동이 아니다
+  if (!ref) return false;
+
+  try {
+    const url = new URL(ref);
+    // 출처가 다르면(외부 사이트) 경로에 admin 이 있어도 절대 통과시키지 않는다
+    if (url.origin !== location.origin) return false;
+    return url.pathname.includes("/admin/");
+  } catch {
+    return false; // 파싱할 수 없는 referrer 는 안전하게 거부한다
+  }
+}
+
+/**
  * 관리자 페이지 진입을 허용할지 판단한다. 모든 관리자 페이지 JS 최상단에서 호출한다.
- * - 이미 이 탭에서 인증했으면(sessionStorage) 아무것도 묻지 않고 바로 통과한다.
- *   → 관리자 페이지 사이를 이동하거나 새로고침해도 다시 묻지 않는다.
- * - 아직 인증 전이면 키를 묻는다. 맞으면 세션에 표시하고 통과.
- * - 취소하거나 틀리면 손님 홈으로 돌려보내고 false 를 반환한다.
- *   (틀린 경우에만 토스트로 안내하고, 취소는 조용히 보낸다)
+ * - 직전 페이지가 같은 사이트의 관리자 페이지면 → 관리자 내부 이동으로 보고 묻지 않고 통과.
+ * - 그 외(손님 페이지 · 외부 · 빈 referrer)면 → 키를 묻는다.
+ *   맞으면 통과, 취소·오답이면 손님 홈으로 돌려보내고 false 를 반환한다.
+ *   (오답일 때만 토스트로 안내하고, 취소는 조용히 보낸다)
  *
- * sessionStorage 라서 탭을 완전히 닫으면 사라진다 → 다음에 다시 묻는다.
- * (localStorage 를 쓰면 브라우저를 껐다 켜도 남으므로 쓰지 않는다)
+ * 인증 상태를 어디에도 저장하지 않으므로(sessionStorage · localStorage 미사용),
+ * 손님 페이지에서 관리자로 넘어올 때는 **매번** 키를 묻는다.
  *
  * @param {string} homePath 인증 실패 시 돌아갈 손님 홈 경로 (호출 파일 기준 상대경로)
  * @returns {boolean} 통과하면 true, 막히면 false (호출부는 false 면 즉시 return 할 것)
  */
 function requireAdmin(homePath) {
-  if (sessionStorage.getItem(ADMIN_SESSION_KEY) === "true") return true;
+  if (isFromAdminPage()) return true; // 관리자 → 관리자 이동은 묻지 않는다
 
   const input = prompt("관리자 키를 입력하세요");
 
-  if (input === ADMIN_KEY) {
-    sessionStorage.setItem(ADMIN_SESSION_KEY, "true");
-    return true;
-  }
+  if (input === ADMIN_KEY) return true;
 
   // 틀린 경우에만 안내한다 (취소(null)는 조용히 돌려보낸다)
   if (input !== null) {
