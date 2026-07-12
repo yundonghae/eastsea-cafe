@@ -12,9 +12,15 @@
 (function () {
 const KEYS = window.CafeData.STORAGE_KEYS;
 
-/* 참고: 관리자 진입 키 확인은 대시보드(admin/index.js) 한 곳에서만 한다.
-   손님 페이지의 🔐 링크는 그냥 admin/index.html 로 이동만 하고,
-   그 페이지가 로드될 때 키를 물어본다. (utils 에는 관련 로직을 두지 않는다) */
+/* ⚠️ 관리자 키 — 진짜 보안이 아니다.
+   이 JS 는 브라우저에 그대로 내려가므로 아래 값도 누구나 소스에서 볼 수 있다.
+   손님이 관리자 화면에 "실수로" 들어가는 것을 막는 UX 장치일 뿐이며,
+   마음먹은 사람은 얼마든지 우회할 수 있다.
+   키 리터럴이 여기저기 흩어지지 않도록 requireAdmin() 안에서만 쓴다. */
+const ADMIN_KEY = "eastsea2026";
+
+/** 관리자 인증 여부를 담는 sessionStorage 키 (탭을 닫으면 사라진다) */
+const ADMIN_SESSION_KEY = "cafe.adminAuthed";
 
 /* ============================================
    포맷
@@ -272,6 +278,43 @@ function statusChipHtml(status) {
 }
 
 /* ============================================
+   관리자 진입 가드 (세션 단위)
+   ⚠️ 다시 강조: 진짜 인증이 아니라 실수 방지용 UX 장치다.
+   ============================================ */
+
+/**
+ * 관리자 페이지 진입을 허용할지 판단한다. 모든 관리자 페이지 JS 최상단에서 호출한다.
+ * - 이미 이 탭에서 인증했으면(sessionStorage) 아무것도 묻지 않고 바로 통과한다.
+ *   → 관리자 페이지 사이를 이동하거나 새로고침해도 다시 묻지 않는다.
+ * - 아직 인증 전이면 키를 묻는다. 맞으면 세션에 표시하고 통과.
+ * - 취소하거나 틀리면 손님 홈으로 돌려보내고 false 를 반환한다.
+ *   (틀린 경우에만 토스트로 안내하고, 취소는 조용히 보낸다)
+ *
+ * sessionStorage 라서 탭을 완전히 닫으면 사라진다 → 다음에 다시 묻는다.
+ * (localStorage 를 쓰면 브라우저를 껐다 켜도 남으므로 쓰지 않는다)
+ *
+ * @param {string} homePath 인증 실패 시 돌아갈 손님 홈 경로 (호출 파일 기준 상대경로)
+ * @returns {boolean} 통과하면 true, 막히면 false (호출부는 false 면 즉시 return 할 것)
+ */
+function requireAdmin(homePath) {
+  if (sessionStorage.getItem(ADMIN_SESSION_KEY) === "true") return true;
+
+  const input = prompt("관리자 키를 입력하세요");
+
+  if (input === ADMIN_KEY) {
+    sessionStorage.setItem(ADMIN_SESSION_KEY, "true");
+    return true;
+  }
+
+  // 틀린 경우에만 안내한다 (취소(null)는 조용히 돌려보낸다)
+  if (input !== null) {
+    showToast("관리자 키가 올바르지 않습니다.", "danger");
+  }
+  location.href = homePath;
+  return false;
+}
+
+/* ============================================
    전역 노출
    ============================================ */
 
@@ -305,6 +348,8 @@ window.CafeUtils = {
   // 사용자
   getUser,
   saveUser,
+  // 관리자 진입 가드 (세션 단위 · 실수 방지용)
+  requireAdmin,
   // 컴포넌트
   qtyStepperHtml,
   statusChipHtml,
