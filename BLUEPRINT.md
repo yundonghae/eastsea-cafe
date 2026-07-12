@@ -275,20 +275,24 @@ cafe-app/
       - `admin/index.js` 초기화 최상단에서 비인가 직접 접근을 한 번 더 검사(대시보드 진입 시점에서만).
       - ⚠️ **진짜 보안이 아니다.** JS·키(`eastsea2026`)가 소스에 그대로 노출되므로 우회 가능.
         손님이 관리자 화면에 **실수로** 들어가는 것을 막는 UX 장치일 뿐이다. (코드 주석에도 명시)
-- [x] **관리자 인증을 세션(sessionStorage) 단위로 전환 + 관리자 7페이지 전부 가드** —
-      `utils.js` 에 **새 함수** `requireAdmin(homePath)` 추가 (기존 함수는 무수정):
-      `sessionStorage["cafe.adminAuthed"] === "true"` 면 묻지 않고 통과(`true`),
-      아니면 `prompt` → 키가 `ADMIN_KEY` 와 맞으면 세션에 표시 후 통과,
-      취소·오답이면 `homePath`(손님 홈)로 돌려보내고 `false` 반환 (오답일 때만 토스트).
+- [x] **관리자 인증을 referrer 기반으로 전환 + 관리자 7페이지 전부 가드** —
+      `utils.js` 의 `requireAdmin(homePath)` 는 **인증 상태를 어디에도 저장하지 않고**
+      `document.referrer`(직전 페이지)만 보고 판단한다. `sessionStorage`/`localStorage` 미사용.
+      - **직전 페이지가 같은 사이트의 관리자 페이지**(`origin` 일치 **AND** `pathname` 에 `/admin/` 포함)
+        → 관리자 내부 이동으로 보고 **묻지 않고 통과**.
+      - 그 외(손님 페이지 · 외부 · 빈 referrer) → `prompt` 로 키를 묻는다. `ADMIN_KEY` 와 맞으면 통과,
+        취소·오답이면 `homePath`(손님 홈)로 돌려보내고 `false` 반환 (오답일 때만 토스트).
+      - **origin 검사가 핵심.** 경로만 보면 `evil.com/admin/` 같은 외부 referrer 로 뚫리므로,
+        `new URL(ref).origin === location.origin` 을 반드시 함께 확인한다 (파싱 실패 시 거부).
       - **관리자 7개 JS 전부**(`admin/index.js`, `menus/{list,detail,create,edit}.js`,
-        `orders/{list,detail}.js`) 최상단에서 `if (!requireAdmin(홈경로)) return;` 로 가드.
-        홈경로는 깊이에 맞춰 `../index.html`(대시보드) / `../../index.html`(하위 6개).
-        → 이제 하위 페이지도 **주소창 직접 접근이 막힌다** (이전엔 대시보드만 검사).
-      - 손님→관리자 **첫 진입에만 1회** 묻고, 관리자 페이지 간 이동·새로고침에는 다시 묻지 않는다.
-        **탭을 닫으면 세션이 사라져** 다음에 다시 묻는다. (`localStorage` 는 쓰지 않음 —
-        브라우저를 껐다 켜도 남아버리므로)
-      - 키 리터럴은 `utils.js` 의 `ADMIN_KEY` **한 곳**에만 존재한다 (페이지들엔 흩어져 있지 않음).
-      - ⚠️ **진짜 보안이 아니다.** 키가 소스에 그대로 노출되어 우회 가능한 실수 방지용 UX 장치다.
+        `orders/{list,detail}.js`) 최상단에서 `if (!requireAdmin(홈경로)) return;` — 호출부는 그대로,
+        내부 로직만 교체했다. 홈경로는 `../index.html`(대시보드) / `../../index.html`(하위 6개).
+      - 결과: 손님→관리자 진입은 **매번** 인증, 관리자끼리 이동은 통과.
+      - ⚠️ **주의(트레이드오프)**: referrer 는 새로고침 시 원래 값이 유지되므로,
+        손님 페이지에서 들어온 관리자 페이지를 **새로고침하면 다시 묻는다.**
+        또 브라우저·서버의 `Referrer-Policy` 로 referrer 가 잘리면 관리자 내부 이동에도 다시 물을 수 있다.
+      - 키 리터럴은 `utils.js` 의 `ADMIN_KEY` **한 곳**에만 존재한다.
+      - ⚠️ **진짜 보안이 아니다.** 키가 소스에 노출되고 referrer 도 위조 가능한 실수 방지용 UX 장치다.
 - [x] **고객 헤더 내비 확장** — 고객 7페이지 모두 `홈 · 메뉴 · 마이페이지 · 주문내역 · 🧺` 로 통일.
       (`my/index.html` 포함 — 자기 자신에는 `aria-current="page"` 부여)
 - [x] **관리자 메뉴 페이지 내비 확장** — `admin/menus/*.html` 4개를
