@@ -440,8 +440,20 @@ function isFromAdminPage() {
 
   try {
     const url = new URL(ref);
-    // 출처가 다르면(외부 사이트) 경로에 admin 이 있어도 절대 통과시키지 않는다
-    if (url.origin !== location.origin) return false;
+
+    // 이 서비스가 쓰이는 호스트 목록 (도메인 + 서버 IP).
+    // nginx 리다이렉트 때문에 referrer 가 IP 로 찍히는 경우가 있어,
+    // 도메인과 IP 를 모두 "같은 서버"로 인정한다.
+    const knownHosts = [
+      location.hostname, // 현재 접속한 호스트 (도메인이든 IP든)
+      "eastsea.newlecture.com", // 서비스 도메인
+      "59.18.34.179", // 서버 IP (nginx 리다이렉트 시 referrer 에 나타남)
+    ];
+
+    // referrer 의 호스트가 우리 서버가 아니면(진짜 외부 사이트) 거부
+    if (!knownHosts.includes(url.hostname)) return false;
+
+    // 우리 서버의 admin 경로에서 왔으면 관리자 내부 이동으로 인정
     return url.pathname.includes("/admin/");
   } catch {
     return false; // 파싱할 수 없는 referrer 는 안전하게 거부한다
