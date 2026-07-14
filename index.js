@@ -181,6 +181,278 @@
   }
 
   /* ============================================
+     추천 메뉴 배너 (캐러셀)
+     기존 카테고리·인기 메뉴 로직과 독립적으로 동작한다.
+     ============================================ */
+
+  const bannerBox = $('[data-banner]');
+
+  /** 배너에 띄울 최대 슬라이드 수 */
+  const BANNER_MAX = 6;
+
+  /** 추천으로 끌어올릴 태그 */
+  const BANNER_TAGS = ['베스트', '시그니처'];
+
+  /** 태그 추천에 먼저 내줄 자리 (나머지는 신메뉴 몫) */
+  const FEATURED_SLOTS = 4;
+
+  /** 신메뉴에 확보해 줄 자리 */
+  const RECENT_SLOTS = 2;
+
+  /** 자동 넘김 간격 */
+  const AUTOPLAY_MS = 4500;
+
+  /** 동작 줄이기 설정이면 자동 넘김을 아예 켜지 않는다 (수동 조작은 그대로) */
+  const reduceMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let bannerIndex = 0;
+  let bannerTimer = null;
+  let bannerStopped = reduceMotion; // 멈춤 버튼 또는 동작 줄이기로 정지 상태인가
+  let bannerSlides = [];
+  let bannerDots = [];
+  let bannerTrack = null;
+
+  /**
+   * 배너에 띄울 메뉴를 고른다.
+   *
+   * 1) 추천 태그(베스트·시그니처) 메뉴 — 지금 데이터엔 10개나 되어서,
+   *    이것만 쓰면 신메뉴가 영영 배너에 오르지 못한다.
+   * 2) 그래서 신메뉴 몫을 따로 떼어 둔다. data.js 는 수정 금지라 "신메뉴" 플래그가 없는데,
+   *    getMenus() 는 SEED_MENUS 순서를 유지하고 새 메뉴는 뒤에 붙으므로
+   *    **배열 뒤쪽을 최근 추가분**으로 본다 (id 하드코딩을 피하려는 의도).
+   *
+   * 품절 메뉴는 제외한다 — 추천해 놓고 못 사면 안 되니까.
+   */
+  function pickBannerMenus() {
+    const sellable = getMenus().filter((m) => !m.soldOut);
+
+    const isFeatured = (m) => (m.tags || []).some((t) => BANNER_TAGS.includes(t));
+
+    const featured = sellable.filter(isFeatured);
+    const recent = sellable.slice(-BANNER_MAX).reverse(); // 최근 추가분 (새 것부터)
+
+    const seen = new Set();
+    const picked = [];
+    const push = (m) => {
+      if (!m || seen.has(m.id) || picked.length >= BANNER_MAX) return;
+      seen.add(m.id);
+      picked.push(m);
+    };
+
+    // 태그 메뉴와 신메뉴에 각각 자리를 보장한 뒤, 남는 자리를 마저 채운다
+    featured.slice(0, FEATURED_SLOTS).forEach(push);
+    recent.slice(0, RECENT_SLOTS).forEach(push);
+    featured.forEach(push);
+    recent.forEach(push);
+
+    return picked;
+  }
+
+  function bannerSlideHtml(menu, i, total) {
+    const image = safeImageUrl(menu.image);
+    const detailUrl = `menus/detail.html?id=${encodeURIComponent(menu.id)}`;
+    const tag = (menu.tags || []).find((t) => BANNER_TAGS.includes(t));
+
+    return `
+      <article class="banner__slide"
+               role="group"
+               aria-roledescription="슬라이드"
+               aria-label="${i + 1} / ${total} ${escapeHtml(menu.name)}">
+        ${
+          image
+            ? `<img class="banner__img" src="${escapeHtml(image)}"
+                 alt="${escapeHtml(menu.name)}" loading="lazy"
+                 onerror="this.style.display='none'">`
+            : ''
+        }
+        <div class="banner__body">
+          ${tag ? `<span class="badge banner__tag">${escapeHtml(tag)}</span>` : ''}
+          <h3 class="banner__name">${escapeHtml(menu.name)}</h3>
+          <p class="banner__desc">${escapeHtml(menu.description)}</p>
+          <strong class="banner__price">${formatPrice(menu.price)}</strong>
+          <div class="banner__actions">
+            <button class="btn btn--primary" data-banner-add="${escapeHtml(menu.id)}">담기</button>
+            <a class="btn btn--outline banner__more" href="${detailUrl}">상세 보기</a>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  function renderBanner() {
+    if (!bannerBox) return;
+
+    const menus = pickBannerMenus();
+
+    // 추천할 게 없으면(전부 품절 등) 배너 섹션 자체를 숨긴다 — 빈 상자를 남기지 않는다
+    const section = bannerBox.closest('.banner-section');
+    if (menus.length === 0) {
+      if (section) section.hidden = true;
+      return;
+    }
+    if (section) section.hidden = false;
+
+    const total = menus.length;
+
+    bannerBox.innerHTML = `
+      <div class="banner__viewport">
+        <div class="banner__track" data-banner-track>
+          ${menus.map((m, i) => bannerSlideHtml(m, i, total)).join('')}
+        </div>
+      </div>
+
+      <button class="banner__arrow banner__arrow--prev" type="button"
+              data-banner-prev aria-label="이전 슬라이드">‹</button>
+      <button class="banner__arrow banner__arrow--next" type="button"
+              data-banner-next aria-label="다음 슬라이드">›</button>
+
+      <div class="banner__controls">
+        <div class="banner__dots" data-banner-dots>
+          ${menus
+            .map(
+              (m, i) => `
+            <button class="banner__dot" type="button"
+                    data-banner-go="${i}"
+                    aria-label="${i + 1}번째 슬라이드로 (${escapeHtml(m.name)})"></button>`
+            )
+            .join('')}
+        </div>
+        <button class="banner__toggle" type="button" data-banner-toggle></button>
+      </div>`;
+
+    bannerTrack = bannerBox.querySelector('[data-banner-track]');
+    bannerSlides = [...bannerBox.querySelectorAll('.banner__slide')];
+    bannerDots = [...bannerBox.querySelectorAll('.banner__dot')];
+
+    bannerIndex = 0;
+    syncBanner();
+    syncToggleButton();
+    startAutoplay();
+  }
+
+  /** 현재 슬라이드에 맞춰 위치·점·접근성 상태를 한 번에 맞춘다 */
+  function syncBanner() {
+    if (!bannerTrack) return;
+
+    // transform 만 움직인다 (레이아웃 유발 없이 GPU 합성)
+    bannerTrack.style.transform = `translateX(-${bannerIndex * 100}%)`;
+
+    bannerSlides.forEach((slide, i) => {
+      const active = i === bannerIndex;
+      slide.setAttribute('aria-hidden', String(!active));
+      // 화면 밖 슬라이드의 버튼·링크는 탭 순서에서 빼 준다 (안 보이는데 포커스되면 혼란)
+      slide.querySelectorAll('a, button').forEach((el) => {
+        el.tabIndex = active ? 0 : -1;
+      });
+    });
+
+    bannerDots.forEach((dot, i) => {
+      const active = i === bannerIndex;
+      dot.classList.toggle('banner__dot--on', active);
+      dot.setAttribute('aria-current', active ? 'true' : 'false');
+    });
+  }
+
+  function goToSlide(i) {
+    if (bannerSlides.length === 0) return;
+    // 무한 순환 — 마지막 다음은 처음으로
+    bannerIndex = (i + bannerSlides.length) % bannerSlides.length;
+    syncBanner();
+  }
+
+  const nextSlide = () => goToSlide(bannerIndex + 1);
+  const prevSlide = () => goToSlide(bannerIndex - 1);
+
+  /* --- 자동 넘김 --- */
+
+  function startAutoplay() {
+    stopAutoplay(); // 타이머가 겹쳐 쌓이지 않게 항상 먼저 정리한다
+    if (bannerStopped || bannerSlides.length < 2) return;
+    bannerTimer = setInterval(nextSlide, AUTOPLAY_MS);
+  }
+
+  function stopAutoplay() {
+    if (bannerTimer === null) return;
+    clearInterval(bannerTimer);
+    bannerTimer = null;
+  }
+
+  /** 멈춤/재생 버튼의 라벨·아이콘을 현재 상태에 맞춘다 */
+  function syncToggleButton() {
+    const btn = bannerBox && bannerBox.querySelector('[data-banner-toggle]');
+    if (!btn) return;
+    btn.textContent = bannerStopped ? '▶' : '❚❚';
+    btn.setAttribute('aria-label', bannerStopped ? '자동 넘김 재생' : '자동 넘김 멈춤');
+  }
+
+  /* --- 배너 이벤트 (이벤트 위임 → 다시 그려도 동작) --- */
+
+  if (bannerBox) {
+    bannerBox.addEventListener('click', (e) => {
+      if (e.target.closest('[data-banner-prev]')) {
+        prevSlide();
+        startAutoplay(); // 수동 조작 직후엔 타이머를 다시 세어 곧바로 넘어가지 않게 한다
+        return;
+      }
+      if (e.target.closest('[data-banner-next]')) {
+        nextSlide();
+        startAutoplay();
+        return;
+      }
+
+      const dot = e.target.closest('[data-banner-go]');
+      if (dot) {
+        goToSlide(Number(dot.dataset.bannerGo));
+        startAutoplay();
+        return;
+      }
+
+      // 자동 넘김 멈춤/재생 (WCAG — 자동으로 움직이는 콘텐츠는 멈출 수 있어야 한다)
+      if (e.target.closest('[data-banner-toggle]')) {
+        bannerStopped = !bannerStopped;
+        syncToggleButton();
+        startAutoplay(); // 멈춤 상태면 내부에서 타이머를 걸지 않는다
+        return;
+      }
+
+      // 배너에서 담기
+      const addBtn = e.target.closest('[data-banner-add]');
+      if (!addBtn) return;
+
+      const menu = getMenuById(addBtn.dataset.bannerAdd);
+      if (!menu) return;
+
+      // 배너를 띄운 뒤 사장님이 품절 처리했을 수도 있으니 한 번 더 확인
+      if (menu.soldOut) {
+        showToast(`'${menu.name}' 은(는) 방금 품절되었습니다.`, 'warning');
+        renderBanner();
+        return;
+      }
+
+      addToCart(menu.id, 1);
+      showToast(`'${menu.name}' 을(를) 장바구니에 담았습니다.`, 'success');
+    });
+
+    // 읽는 중에 넘어가지 않도록, 마우스를 올리거나 키보드 포커스가 들어오면 잠시 멈춘다
+    bannerBox.addEventListener('mouseenter', stopAutoplay);
+    bannerBox.addEventListener('mouseleave', startAutoplay);
+    bannerBox.addEventListener('focusin', stopAutoplay);
+    bannerBox.addEventListener('focusout', startAutoplay);
+  }
+
+  /* --- 타이머 정리 (메모리 누수 방지) --- */
+
+  // 탭이 백그라운드면 굳이 돌릴 이유가 없다
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopAutoplay();
+    else startAutoplay();
+  });
+
+  // 페이지를 떠날 때 반드시 정리한다
+  window.addEventListener('pagehide', stopAutoplay);
+
+  /* ============================================
      이벤트 (다시 그려도 동작하도록 위임 사용)
      ============================================ */
 
@@ -213,6 +485,7 @@
     showToast(flash, 'success');
   }
 
+  renderBanner();
   renderCategories();
   renderPicks();
 })();
